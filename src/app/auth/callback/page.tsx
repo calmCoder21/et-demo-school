@@ -1,68 +1,66 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function Callback() {
+export default function AuthCallbackPage() {
   const router = useRouter();
-  const processed = useRef(false); // Prevent double-running
 
   useEffect(() => {
-    const handleCallback = async () => {
-      if (processed.current) return;
-
-      // 1. Give the Supabase client a moment to parse the URL hash
+    const processAuth = async () => {
+      // 1. Give the Supabase library a moment to parse the fragment
       const { data: { session }, error } = await supabase.auth.getSession();
 
-      if (error) {
-        console.error("Auth error:", error.message);
-        router.push("/login");
+      if (error || !session) {
+        // If we still don't have a session, wait a brief moment and retry once
+        setTimeout(async () => {
+          const { data: { session: retrySession } } = await supabase.auth.getSession();
+          if (retrySession) {
+            handleRedirect(retrySession.user);
+          } else {
+            router.push("/login?error=session_not_found");
+          }
+        }, 1500);
         return;
       }
 
-      if (session) {
-        processed.current = true;
-        const user = session.user;
+      handleRedirect(session.user);
+    };
 
-        // 2. Fetch the profile
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
+    const handleRedirect = async (user: any) => {
+      // 2. Fetch the profile to know where to send them
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
 
-        if (!profile) {
-          // Create profile if missing
-          await supabase.from("profiles").insert({
-            id: user.id,
-            role: "guardian",
-            full_name: user.user_metadata?.full_name || user.user_metadata?.name || "New User",
-          });
-          router.push("/dashboard");
-        } else {
-          // Role-based redirect
-          if (profile.role === "admin") router.push("/admin");
-          else if (profile.role === "finance") router.push("/finance");
-          else router.push("/dashboard");
-        }
+      if (!profile) {
+        // Create the profile if it doesn't exist (First time Google users)
+        await supabase.from("profiles").insert({
+          id: user.id,
+          role: "guardian",
+          full_name: user.user_metadata?.full_name || "New User",
+        });
+        router.push("/dashboard");
       } else {
-        // 3. If no session yet, wait a bit. OAuth redirects can be slow.
-        setTimeout(async () => {
-          const { data: { session: retrySession } } = await supabase.auth.getSession();
-          if (!retrySession) router.push("/login");
-          else handleCallback(); // Recurse once if session found
-        }, 2000);
+        // Redirect based on role
+        if (profile.role === "admin") router.push("/admin");
+        else if (profile.role === "finance") router.push("/finance");
+        else router.push("/dashboard");
       }
     };
 
-    handleCallback();
+    processAuth();
   }, [router]);
 
   return (
-    <div className="p-10 flex flex-col items-center">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black mb-4"></div>
-      <p>Verifying credentials...</p>
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
+        <p className="text-lg">Finalizing your login...</p>
+      </div>
     </div>
   );
 }
