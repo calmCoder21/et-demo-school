@@ -1,82 +1,65 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(req: NextRequest) {
-  // 1. Create an initial response
-  let res = NextResponse.next({
-    request: {
-      headers: req.headers,
-    },
-  });
+export async function middleware(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({
+    request,
+  })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name) {
-          return req.cookies.get(name)?.value;
+        getAll() {
+          return request.cookies.getAll()
         },
-        set(name, value, options) {
-          // This ensures cookies are passed along correctly
-          req.cookies.set({ name, value, ...options });
-          res = NextResponse.next({
-            request: {
-              headers: req.headers,
-            },
-          });
-          res.cookies.set({ name, value, ...options });
-        },
-        remove(name, options) {
-          req.cookies.set({ name, value: "", ...options });
-          res = NextResponse.next({
-            request: {
-              headers: req.headers,
-            },
-          });
-          res.cookies.set({ name, value: "", ...options });
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({
+            request,
+          })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
         },
       },
     }
-  );
+  )
 
-  // 2. Refresh session if it exists (IMPORTANT for Production)
-  const { data: { user } } = await supabase.auth.getUser();
+  // This refreshes the session - DO NOT REMOVE
+  const { data: { user } } = await supabase.auth.getUser()
 
-  const pathname = req.nextUrl.pathname;
+  const path = request.nextUrl.pathname
 
-  // 🔒 Define route types
-  const isProtectedRoute = pathname.startsWith("/admin") || 
-                           pathname.startsWith("/finance") || 
-                           pathname.startsWith("/dashboard");
-
-  // 3. If no user and trying to access protected route -> Redirect to login
-  if (!user && isProtectedRoute) {
-    return NextResponse.redirect(new URL("/login", req.url));
+  // 1. If NO user and trying to access protected areas
+  if (!user && (path.startsWith('/dashboard') || path.startsWith('/admin') || path.startsWith('/finance'))) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
   }
 
-  // 4. If there IS a user, check their role
-  if (user && isProtectedRoute) {
+  // 2. If user EXISTS, check their role
+  if (user) {
     const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle(); // Use maybeSingle to avoid errors if profile is still being created
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle()
 
-    const role = profile?.role;
+    const role = profile?.role
 
-    if (pathname.startsWith("/admin") && role !== "admin") {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+    if (path.startsWith('/admin') && role !== 'admin') {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
     }
-    if (pathname.startsWith("/finance") && role !== "finance") {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+    if (path.startsWith('/finance') && role !== 'finance') {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
     }
   }
 
-  return res;
+  return supabaseResponse
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/finance/:path*", "/dashboard/:path*"],
-};
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|auth/callback|api).*)'],
+}
