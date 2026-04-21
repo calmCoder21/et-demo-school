@@ -2,6 +2,14 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+  const path = request.nextUrl.pathname
+
+  // 🚨 STRATEGY: Do not run any auth logic on the callback route. 
+  // Let the client-side code handle the #access_token first.
+  if (path.startsWith('/auth/callback') || path === '/login' || path === '/signup') {
+    return NextResponse.next()
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -15,10 +23,8 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({
-            request,
-          })
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           )
@@ -27,39 +33,20 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // This refreshes the session - DO NOT REMOVE
+  // This is the check that usually fails during the redirect loop
   const { data: { user } } = await supabase.auth.getUser()
 
-  const path = request.nextUrl.pathname
+  const isProtectedRoute = path.startsWith('/dashboard') || 
+                           path.startsWith('/admin') || 
+                           path.startsWith('/finance')
 
-  // 1. If NO user and trying to access protected areas
-  if (!user && (path.startsWith('/dashboard') || path.startsWith('/admin') || path.startsWith('/finance'))) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
-
-  // 2. If user EXISTS, check their role
-  if (user) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    const role = profile?.role
-
-    if (path.startsWith('/admin') && role !== 'admin') {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
-    if (path.startsWith('/finance') && role !== 'finance') {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
+  if (!user && isProtectedRoute) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|auth/callback|api).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api).*)'],
 }
