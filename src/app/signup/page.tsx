@@ -70,7 +70,7 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: "https://et-demo-school/auth/callback",
+        redirectTo: "https://et-demo-school.vercel.app/auth/callback",
       },
     });
 
