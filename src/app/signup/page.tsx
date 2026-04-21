@@ -70,7 +70,7 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: "http://localhost:3000/auth/callback",
+        redirectTo: "et-demo-school/auth/callback",
       },
     });
 
