@@ -8,17 +8,9 @@ export default function Callback() {
   const router = useRouter();
 
   useEffect(() => {
-    const handle = async () => {
-      const { data } = await supabase.auth.getSession();
-
-      if (!data.session) {
-        router.push("/login");
-        return;
-      }
-
-      const user = data.session.user;
-
-      // 🔥 check profile
+    // 1. Create a function to handle the logic
+    const handleAuth = async (user: any) => {
+      // Check if profile exists
       const { data: profile } = await supabase
         .from("profiles")
         .select("role")
@@ -26,28 +18,44 @@ export default function Callback() {
         .maybeSingle();
 
       if (!profile) {
-        // ⚠️ fallback (in case trigger still fails)
+        // Fallback for new users
         await supabase.from("profiles").insert({
           id: user.id,
           role: "guardian",
-          full_name: user.user_metadata?.name || "Unknown",
+          full_name: user.user_metadata?.full_name || user.user_metadata?.name || "Unknown",
         });
-
         router.push("/dashboard");
-        return;
-      }
-
-      if (profile.role === "admin") {
-        router.push("/admin");
-      } else if (profile.role === "finance") {
-        router.push("/finance");
       } else {
-        router.push("/dashboard");
+        // Redirect based on role
+        if (profile.role === "admin") router.push("/admin");
+        else if (profile.role === "finance") router.push("/finance");
+        else router.push("/dashboard");
       }
     };
 
-    handle();
+    // 2. Listen for the INITIAL session or an AUTH STATE CHANGE
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        await handleAuth(session.user);
+      } else if (event === "INITIAL_SESSION" && !session) {
+        // Only redirect to login if we are absolutely sure there is no session coming
+        // Give it a tiny delay to be safe
+        setTimeout(() => {
+           // We check one last time before giving up
+           supabase.auth.getSession().then(({data}) => {
+             if (!data.session) router.push("/login");
+           });
+        }, 1500);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [router]);
 
-  return <div className="p-10">Signing you in...</div>;
+  return (
+    <div className="p-10 flex flex-col items-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black mb-4"></div>
+      <p>Finalizing your sign-in...</p>
+    </div>
+  );
 }
